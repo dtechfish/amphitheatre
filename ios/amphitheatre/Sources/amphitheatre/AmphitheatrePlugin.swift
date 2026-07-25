@@ -117,6 +117,15 @@ public class AmphitheatrePlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
         if let endMs, endMs < 0 { return reportBadParams(result) }
         if let startMs, let endMs, endMs <= startMs { return reportBadParams(result) }
 
+        // The input file is never modified or deleted; the pre-export cleanup
+        // and failure paths delete the output file, so the two must never
+        // alias.
+        guard URL(fileURLWithPath: inputPath).standardizedFileURL
+                != URL(fileURLWithPath: outputPath).standardizedFileURL else {
+            result(FlutterError(code: ErrorCodes.badParams, message: "The input and output paths must differ.", details: nil))
+            return
+        }
+
         guard activeExports[id] == nil else {
             result(FlutterError(code: ErrorCodes.badParams, message: "An export with ID '\(id)' is already running.", details: nil))
             return
@@ -317,6 +326,14 @@ public class AmphitheatrePlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
             }
 
             let seconds = CMTimeGetSeconds(duration)
+
+            // An unreadable or indefinite duration (corrupt file, stream)
+            // would produce invalid CMTimes; return no thumbnails instead.
+            guard seconds.isFinite, seconds > 0 else {
+                await MainActor.run { result([FlutterStandardTypedData]()) }
+                return
+            }
+
             let times: [CMTime] = (0..<boundedCount).map { index in
                 CMTime(
                     seconds: seconds * (2.0 * Double(index) + 1.0) / (2.0 * Double(boundedCount)),

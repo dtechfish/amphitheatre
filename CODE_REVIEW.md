@@ -158,3 +158,16 @@ Known considerations (accepted, documented):
 - `example/test/widget_test.dart` is stale (pre-dates the rewrite; asserts "Running on:" text that the example never renders). Left untouched; worth replacing when the example is next revised.
 
 Still to verify on a machine with the Flutter SDK: `flutter analyze`, `flutter test`, `flutter gen-l10n` (generated files were maintained by hand), an Android build against media3 `1.10.1` (confirm artifact resolves and `experimentalSetTrimOptimizationEnabled` still bears that name), an iOS `pod install`/build, and a real-device export of a multi-GB video on both platforms.
+
+## 7. Final review (cross-layer audit + independent model review)
+
+A final pass consisted of (a) a deterministic cross-layer contract audit — method names, event-channel name, argument keys, quality wire values, and all five error codes are identical across Dart, Kotlin, and Swift — and (b) an independent adversarial review of both native files by Gemini. Findings applied:
+
+- **Input/output aliasing guard (both platforms):** the failure/cancel paths delete the output file, so if a caller ever passed the same path for input and output, the source video could have been destroyed. Both plugins now reject aliased paths with `ERR_BAD_PARAMS` (Android compares canonical paths; iOS compares standardized file URLs). Regression test added.
+- **Android, audio-only inputs:** an unknown video height previously resolved to "very large," which attached a `Presentation` scaling effect even to files with no video track — a guaranteed export failure. Unknown height now resolves to "no scaling."
+- **Android, engine re-attach:** the thumbnail executor was created once and shut down on detach, so a re-attached plugin instance would throw `RejectedExecutionException` forever. It is now created per attach and `shutdownNow()` on detach.
+- **Android, hanging futures:** a catastrophic failure (e.g., `OutOfMemoryError`) on the thumbnail thread would have died silently, leaving the Dart future pending forever. The background block now catches `Throwable` and always answers the channel.
+- **Android, rotated thumbnails:** the scaled-frame target box now uses display-orientation dimensions (the retriever returns rotation-applied frames).
+- **iOS, corrupt/indefinite durations:** `getThumbnails` now guards against NaN/zero durations instead of generating invalid `CMTime`s.
+
+Reviewed and deliberately **not** changed (Gemini flagged, evidence says fine): the `.positiveInfinity` end time (Apple documents zero→infinity as `timeRange`'s default "whole asset" sentinel, and the editor always sends both bounds anyway); `await session.export()` on the pre-18 branch (identical call shipped in v0.0.3 at iOS 13); strong `self` captures in export Tasks (a weak capture would silently drop the pending Flutter result — the brief retention until completion is the correct trade-off); per-export progress-poll lifetime (bounded by the export entry itself, stopped by completion or cancel).

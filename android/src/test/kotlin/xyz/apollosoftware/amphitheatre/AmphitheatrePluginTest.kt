@@ -87,6 +87,27 @@ internal class AmphitheatrePluginTest {
   }
 
   @Test
+  fun startExport_rejectsAliasedPaths() {
+    val mockResult: MethodChannel.Result = mock(MethodChannel.Result::class.java)
+    plugin.onMethodCall(
+      MethodCall(
+        "startExport",
+        mapOf(
+          "id" to "1",
+          "inputPath" to "/foo/same.mp4",
+          "outputPath" to "/foo/same.mp4",
+          "startMs" to 0,
+          "endMs" to 1000,
+          "quality" to "passthrough",
+        ),
+      ),
+      mockResult,
+    )
+
+    verify(mockResult).error(ErrorCodes.BAD_PARAMS, "The input and output paths must differ.", null)
+  }
+
+  @Test
   fun startExport_reportsMissingFile() {
     val mockResult: MethodChannel.Result = mock(MethodChannel.Result::class.java)
     plugin.onMethodCall(

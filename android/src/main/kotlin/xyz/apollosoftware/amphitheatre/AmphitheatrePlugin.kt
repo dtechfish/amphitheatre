@@ -62,7 +62,7 @@ class AmphitheatrePlugin : FlutterPlugin, MethodCallHandler, EventChannel.Stream
   private var eventSink: EventChannel.EventSink? = null
 
   private val mainHandler = Handler(Looper.getMainLooper())
-  private val thumbnailExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+  private var thumbnailExecutor: ExecutorService? = null
 
   /** Progress polling interval, in milliseconds. */
   private val progressIntervalMs = 250L
@@ -78,6 +78,7 @@ class AmphitheatrePlugin : FlutterPlugin, MethodCallHandler, EventChannel.Stream
 
   override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
     context = binding.applicationContext
+    thumbnailExecutor = Executors.newSingleThreadExecutor()
     channel = MethodChannel(binding.binaryMessenger, kChannelName)
     channel.setMethodCallHandler(this)
     eventChannel = EventChannel(binding.binaryMessenger, kEventChannelName)
@@ -95,7 +96,8 @@ class AmphitheatrePlugin : FlutterPlugin, MethodCallHandler, EventChannel.Stream
 
     channel.setMethodCallHandler(null)
     eventChannel.setStreamHandler(null)
-    thumbnailExecutor.shutdown()
+    thumbnailExecutor?.shutdownNow()
+    thumbnailExecutor = null
     eventSink = null
     context = null
   }
@@ -150,6 +152,12 @@ class AmphitheatrePlugin : FlutterPlugin, MethodCallHandler, EventChannel.Stream
       return result.error(ErrorCodes.BAD_PARAMS, "Invalid parameters supplied to startExport()", null)
     }
 
+    // The input file is never modified or deleted; the failure/cancellation
+    // paths delete the output file, so the two must never alias.
+    if (File(inputPath).canonicalPath == File(outputPath).canonicalPath) {
+      return result.error(ErrorCodes.BAD_PARAMS, "The input and output paths must differ.", null)
+    }
+
     val targetHeight: Int? = when (quality) {
       "passthrough" -> null
       "2160p" -> 2160
@@ -182,8 +190,11 @@ class AmphitheatrePlugin : FlutterPlugin, MethodCallHandler, EventChannel.Stream
 
     val editedMediaItem = EditedMediaItem.Builder(mediaItem).apply {
       // Only scale down; never upscale a video that is already smaller than
-      // the requested quality.
-      if (targetHeight != null && targetHeight < displayHeightOf(inputPath)) {
+      // the requested quality. When the height is unknown (or the file has no
+      // video track), no scaling effect is applied — adding a video effect to
+      // an audio-only file would make the export fail.
+      val sourceHeight = if (targetHeight != null) displayHeightOf(inputPath) else -1
+      if (targetHeight != null && sourceHeight > 0 && targetHeight < sourceHeight) {
         setEffects(Effects(emptyList(), listOf(Presentation.createForHeight(targetHeight))))
       }
     }.build()
@@ -243,9 +254,9 @@ class AmphitheatrePlugin : FlutterPlugin, MethodCallHandler, EventChannel.Stream
   }
 
   /**
-   * Returns the height of the video at [path] in display orientation, or
-   * [Int.MAX_VALUE] if it cannot be determined (in which case scaling is
-   * skipped and the encoder receives the source size).
+   * Returns the height of the video at [path] in display orientation, or -1
+   * if it cannot be determined (e.g., the file has no video track), in which
+   * case no scaling is applied.
    */
   private fun displayHeightOf(path: String): Int {
     val retriever = MediaMetadataRetriever()
@@ -255,11 +266,11 @@ class AmphitheatrePlugin : FlutterPlugin, MethodCallHandler, EventChannel.Stream
       val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull()
       val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
 
-      if (width == null || height == null) Int.MAX_VALUE
+      if (width == null || height == null) -1
       else if (rotation == 90 || rotation == 270) width
       else height
     } catch (_: Exception) {
-      Int.MAX_VALUE
+      -1
     } finally {
       try {
         retriever.release()
@@ -326,9 +337,25 @@ class AmphitheatrePlugin : FlutterPlugin, MethodCallHandler, EventChannel.Stream
     val boundedCount = count.coerceAtMost(50)
     val boundedMaxHeight = maxHeight.coerceAtMost(1080)
 
-    thumbnailExecutor.execute {
-      val thumbnails = extractThumbnails(path, boundedCount, boundedMaxHeight)
-      mainHandler.post { result.success(thumbnails) }
+    val executor = thumbnailExecutor
+      ?: return result.error(ErrorCodes.INIT_FAILED, "The plugin is not attached to an engine.", null)
+
+    executor.execute {
+      // A platform method must always answer: even a catastrophic background
+      // failure (e.g., OutOfMemoryError) must not leave the Dart future
+      // hanging.
+      try {
+        val thumbnails = extractThumbnails(path, boundedCount, boundedMaxHeight)
+        mainHandler.post { result.success(thumbnails) }
+      } catch (throwable: Throwable) {
+        mainHandler.post {
+          result.error(
+            ErrorCodes.EXPORT_FAILED,
+            "Thumbnail extraction failed: ${throwable.message ?: throwable}",
+            null,
+          )
+        }
+      }
     }
   }
 
@@ -380,14 +407,23 @@ class AmphitheatrePlugin : FlutterPlugin, MethodCallHandler, EventChannel.Stream
 
   private fun frameAt(retriever: MediaMetadataRetriever, timeUs: Long, maxHeight: Int): Bitmap? {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-      val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull()
-      val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull()
+      val rawHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull()
+      val rawWidth = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull()
+      val rotation = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
 
-      if (height != null && width != null && height > maxHeight) {
-        val scaledWidth = (width * maxHeight / height).coerceAtLeast(1)
-        return retriever.getScaledFrameAtTime(
-          timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, scaledWidth, maxHeight,
-        )
+      if (rawHeight != null && rawWidth != null) {
+        // The retriever returns frames in display orientation, so the target
+        // box must use the rotated dimensions.
+        val rotated = rotation == 90 || rotation == 270
+        val height = if (rotated) rawWidth else rawHeight
+        val width = if (rotated) rawHeight else rawWidth
+
+        if (height > maxHeight) {
+          val scaledWidth = (width * maxHeight / height).coerceAtLeast(1)
+          return retriever.getScaledFrameAtTime(
+            timeUs, MediaMetadataRetriever.OPTION_CLOSEST_SYNC, scaledWidth, maxHeight,
+          )
+        }
       }
     }
 
