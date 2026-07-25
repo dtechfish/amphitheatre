@@ -1,3 +1,6 @@
+// Test sources are not part of the public API surface.
+// ignore_for_file: public_member_api_docs
+
 import 'package:amphitheatre/amphitheatre.dart';
 import 'package:flutter_test/flutter_test.dart';
 

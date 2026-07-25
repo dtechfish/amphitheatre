@@ -224,8 +224,21 @@ class AmphitheatrePlugin : FlutterPlugin, MethodCallHandler, EventChannel.Stream
       })
       .build()
 
+    try {
+      transformer.start(editedMediaItem, outputFile.absolutePath)
+    } catch (exception: Exception) {
+      outputFile.delete()
+      return result.error(
+        ErrorCodes.EXPORT_FAILED,
+        exception.message ?: "The export could not be started.",
+        null,
+      )
+    }
+
+    // Registering after start() is safe: listener callbacks are posted to
+    // this (the main) thread's looper, so they cannot run until this method
+    // returns.
     activeExports[id] = ActiveExport(transformer, result, outputFile)
-    transformer.start(editedMediaItem, outputFile.absolutePath)
     scheduleProgressUpdates(id)
   }
 

@@ -118,3 +118,43 @@ If CDN-friendly file sizes are a goal, transcoding with a target resolution/bitr
 - Golden MP4 fixtures (H.264/HEVC, rotated, multi-track, >4 GB sparse) exercised in Android instrumentation + iOS XCTest.
 - A "large file" integration test that asserts peak memory stays flat during export.
 - Dart unit tests for the editor controller (crop clamping, min/max length) and widget tests for the export failure path (error → user can leave the screen).
+
+---
+
+## 5. Addendum (2026-07-25): responses to developer notes
+
+Responses to Samuel Jakob's notes on this review, for the record:
+
+**"The current implementation doesn't stream large files, which is likely the issue."**
+Agreed — that is the root cause, and it is what the v0.1.0 rewrite fixes (paths end-to-end, streaming native pipelines, no bytes in Dart memory).
+
+**"That would require like 2+ GiB."**
+The old pipeline fails well below 2 GiB, on three independent paths:
+
+1. *Android JVM heap (the practical killer):* after the remux, `MP4.kt` eagerly parsed the **entire output file — including `mdat` — into Java byte arrays**. The Android Java heap cap is 256–512 MB on most devices (`largeHeap` at best ~1 GB), so **`OutOfMemoryError` fires from roughly a few hundred MB of video**, not 2 GiB. This heap is separate from (and much smaller than) the native heap that Dart's `Uint8List`s use, which is why the Dart-side read could survive and the Kotlin side still crashed.
+2. *Android ANR:* the remux ran synchronously on the main thread. ANR is time-based (~5 s of blocked input), not size-based — a remux of even a few hundred MB on slow flash, plus one screen tap, kills the app regardless of heap.
+3. *iOS jetsam:* memory limits are device-dependent and well under 2 GiB on older hardware; the Dart read + temp-file copy also transiently holds more than the file size.
+
+**"iOS compresses the file before it even gives it to the app."**
+True for `UIImagePickerController`-based pickers (which `image_picker` uses; it may transcode on the way in) — but not for camera-roll originals obtained via `PHPickerViewController` with original versions, the camera plugin, or files shared into the app. Two implications: (a) Android receives untranscoded originals, which is consistent with the crash chain above being Android-heavy; (b) the rewrite defaults to `passthrough` quality, so already-compressed iOS inputs are not compressed a second time.
+
+**"MOV atoms already have a 32-bit limit... no MOV atom is going to be that big."**
+Partially disagree as a spec matter: ISO BMFF/QuickTime support atoms larger than 4 GiB via `size == 1` + 64-bit `largesize`, and the `mdat` atom of a long recording routinely **is** that big — that's exactly why `co64` (64-bit chunk offsets, which `MP4.kt` itself implemented) exists. So the 32-bit size paths were real limits, though secondary ones. The primary defect was independent of atom size: `mdat` of *any* size was loaded into the JVM heap (point 1 above). Either way it is moot now — `MP4.kt` is deleted in the rewrite; fast-start comes from media3's default `InAppMp4Muxer` on Android and `shouldOptimizeForNetworkUse` on iOS.
+
+## 6. Post-rewrite review record (v0.1.0, `rewrite` branch — NOT merged)
+
+A full second-pass review of the rewrite diff found and fixed:
+
+- `_SliderMetrics.trackWidth` mixed `double`/`int` in `math.max` (inference to `num` → compile error under `strict-casts`). Fixed with a `double` literal.
+- Android: if `Transformer.start()` threw synchronously, the export stayed registered → progress poller looped forever and a later `cancelExport` could answer the same `MethodChannel.Result` twice. Fixed by registering the export only after a guarded `start()`.
+- A cancel-before-start race in `AmphitheatreExportSession` (cancel issued while the temp directory was being resolved was silently ignored). Fixed with an explicit pre-start check.
+- Test hygiene for this repo's strict lints (unclosed `StreamController` in the fake platform; documented `public_member_api_docs` ignores in test files).
+
+Known considerations (accepted, documented):
+
+- iOS passthrough preset with `.mp4` output can fail for exotic `.mov` contents (e.g., ProRes, timecode tracks). The failure surfaces cleanly in the retry UI; selecting a transcoding quality is the workaround. A `supportedFileTypes` check with a `.mov` fallback could be added later.
+- Android reads video metadata (height/rotation) on the platform thread before a transcode — header-only, milliseconds, accepted.
+- Trim start snaps to the nearest sync frame in pure-passthrough scenarios on iOS; on Android, media3's trim optimization re-encodes only the first GOP for accurate starts.
+- `example/test/widget_test.dart` is stale (pre-dates the rewrite; asserts "Running on:" text that the example never renders). Left untouched; worth replacing when the example is next revised.
+
+Still to verify on a machine with the Flutter SDK: `flutter analyze`, `flutter test`, `flutter gen-l10n` (generated files were maintained by hand), an Android build against media3 `1.10.1` (confirm artifact resolves and `experimentalSetTrimOptimizationEnabled` still bears that name), an iOS `pod install`/build, and a real-device export of a multi-GB video on both platforms.

@@ -1,3 +1,6 @@
+// Test sources are not part of the public API surface.
+// ignore_for_file: public_member_api_docs
+
 import 'dart:async';
 
 import 'package:amphitheatre/amphitheatre.dart';
@@ -56,6 +59,8 @@ final class _FakeAmphitheatrePlatform extends AmphitheatrePlatform {
   @override
   Stream<AmphitheatreExportProgressEvent> get exportProgressEvents =>
       events.stream;
+
+  Future<void> dispose() => events.close();
 }
 
 void main() {
@@ -66,8 +71,9 @@ void main() {
     setAmphitheatrePlatform(platform);
   });
 
-  tearDown(() {
+  tearDown(() async {
     setAmphitheatrePlatform(null);
+    await platform.dispose();
   });
 
   group('AmphitheatreExporter', () {

@@ -797,7 +797,7 @@ final class _SliderMetrics {
 
   double get trackLeft => inset;
   double get trackRight => size.width - inset;
-  double get trackWidth => math.max(size.width - inset * 2, 1);
+  double get trackWidth => math.max(size.width - inset * 2, 1.0);
 
   Rect get trackRect => Rect.fromLTRB(trackLeft, 0, trackRight, size.height);
 
