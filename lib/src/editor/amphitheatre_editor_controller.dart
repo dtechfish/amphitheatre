@@ -12,7 +12,7 @@ sealed class AmphitheatreEditorAction {
   const AmphitheatreEditorAction();
 
   /// Converts the action to a JSON representation. (Typically a
-  /// `Map<String, dynamic`).
+  /// `Map<String, dynamic>`).
   dynamic toJson();
 }
 
@@ -49,56 +49,93 @@ final class AmphitheatreEditorActionCrop extends AmphitheatreEditorAction {
 /// The controller for an [AmphitheatreEditor]. This is used in addition to the
 /// [AmphitheatreController] (which is for the video) to control the edit
 /// actions that should be applied to the video.
+///
+/// Continuous gestures (e.g., dragging a crop handle) should apply their
+/// intermediate values with `commit: false` and call [commitPending] once the
+/// gesture ends: only committed values participate in the undo [history].
 final class AmphitheatreEditorController with ChangeNotifier {
+  /// The maximum number of history entries retained for [undo].
+  static const int maxHistoryLength = 64;
+
   AmphitheatreEditorModifications _value =
       const AmphitheatreEditorModifications.empty();
 
-  final Queue<AmphitheatreEditorModifications> _history = Queue();
+  /// The last committed value; the baseline that [commitPending] compares
+  /// against.
+  AmphitheatreEditorModifications _committed =
+      const AmphitheatreEditorModifications.empty();
+
+  /// The initial state of the editor (i.e., the automatically applied default
+  /// crop), which does not count as a user modification.
+  AmphitheatreEditorModifications _initial =
+      const AmphitheatreEditorModifications.empty();
+
+  final ListQueue<AmphitheatreEditorModifications> _history = ListQueue();
 
   /// The current set of editor modifications.
   AmphitheatreEditorModifications get value => _value;
 
-  /// Check whether a modification has been applied to the video.
-  bool get hasModification => _history.isNotEmpty;
+  /// Check whether the user has modified the video (relative to the editor's
+  /// initial state).
+  bool get hasModification => _value != _initial;
 
-  /// If [value] is different to [_value], applies the new [value] in its place,
-  /// moving the old value to the end of the [_history] queue.
-  ///
-  /// When [irreversible] is true, the entry is not added to the history. If
-  /// there are already history items, a [StateError] is thrown because the
-  /// intention would be ambiguous
-  void _applyNewValue(
-    final AmphitheatreEditorModifications value, {
-    final bool irreversible = false,
-  }) {
-    if (_value != value) {
-      if (!irreversible) {
-        _history.add(_value);
-      } else if (_history.isNotEmpty) {
-        throw StateError(
-          'Cannot perform an irreversible action when there are existing modifications.',
-        );
-      }
-      _value = value;
-    }
-
-    notifyListeners();
-  }
+  /// Whether there is a previous committed state to [undo] to.
+  bool get canUndo => _history.isNotEmpty;
 
   /// Crop the video length to only retain the part between [start] and [end].
   ///
-  /// See [AmphitheatreEditorActionCrop].
+  /// When [commit] is false the change is applied and listeners are notified,
+  /// but the change does not enter the undo history until [commitPending] is
+  /// called. See [AmphitheatreEditorActionCrop].
   void crop({
     required final Duration start,
     required final Duration end,
-    final bool irreversible = false,
-  }) =>
-      _applyNewValue(
-        value.copyWith(
-          crop: AmphitheatreEditorActionCrop(start: start, end: end),
-        ),
-        irreversible: irreversible,
-      );
+    final bool commit = true,
+  }) {
+    final AmphitheatreEditorModifications next = _value.copyWith(
+      crop: AmphitheatreEditorActionCrop(start: start, end: end),
+    );
+
+    if (next == _value) return;
+    _value = next;
+    if (commit) commitPending();
+    notifyListeners();
+  }
+
+  /// Marks the current value as the editor's initial state. The initial state
+  /// does not count as a modification and clears any history.
+  ///
+  /// This is called by the editor after applying the default crop when the
+  /// video loads.
+  void markInitial() {
+    _initial = _value;
+    _committed = _value;
+    _history.clear();
+    notifyListeners();
+  }
+
+  /// Commits the pending value (if it differs from the last committed value),
+  /// making it a single entry in the undo history.
+  void commitPending() {
+    if (_value == _committed) return;
+
+    _history.addLast(_committed);
+    while (_history.length > maxHistoryLength) {
+      _history.removeFirst();
+    }
+
+    _committed = _value;
+    notifyListeners();
+  }
+
+  /// Reverts to the previously committed state, if there is one.
+  void undo() {
+    if (_history.isEmpty) return;
+
+    _committed = _history.removeLast();
+    _value = _committed;
+    notifyListeners();
+  }
 }
 
 /// The set of modifications to be applied to a video.

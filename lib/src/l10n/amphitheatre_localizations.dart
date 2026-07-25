@@ -142,11 +142,59 @@ abstract class AmphitheatreLocalizations {
   /// **'Replay'**
   String get replay;
 
-  /// Label indicating the progress when exporting a video with percentage progress.
+  /// Accessibility label describing the progress while exporting a video, with percentage progress.
   ///
   /// In en, this message translates to:
   /// **'Exporting video ({progress})...'**
   String exportingVideo(double progress);
+
+  /// Title shown on the export progress screen while the video is being exported.
+  ///
+  /// In en, this message translates to:
+  /// **'Exporting video…'**
+  String get exportingVideoTitle;
+
+  /// A percentage, shown inside the export progress ring.
+  ///
+  /// In en, this message translates to:
+  /// **'{progress}'**
+  String progressPercent(double progress);
+
+  /// Title shown when exporting the video failed.
+  ///
+  /// In en, this message translates to:
+  /// **'Export didn\'t finish'**
+  String get exportFailedTitle;
+
+  /// Body text shown when exporting the video failed, reassuring the user that the source video is intact.
+  ///
+  /// In en, this message translates to:
+  /// **'Something went wrong while processing the video. Your original video hasn\'t been changed.'**
+  String get exportFailedBody;
+
+  /// Label for the button that retries a failed export.
+  ///
+  /// In en, this message translates to:
+  /// **'Try again'**
+  String get retry;
+
+  /// Label for the button that dismisses the export failure screen and returns to the editor.
+  ///
+  /// In en, this message translates to:
+  /// **'Back to editor'**
+  String get backToEditor;
+
+  /// Shown under the trim timeline, indicating the length of the current selection (e.g., '00:42 selected').
+  ///
+  /// In en, this message translates to:
+  /// **'{time} selected'**
+  String selectedDuration(String time);
+
+  /// Shown in the player when the video failed to load.
+  ///
+  /// In en, this message translates to:
+  /// **'This video can\'t be played.'**
+  String get videoLoadFailed;
 }
 
 class _AmphitheatreLocalizationsDelegate extends LocalizationsDelegate<AmphitheatreLocalizations> {

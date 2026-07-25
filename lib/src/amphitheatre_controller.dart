@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:amphitheatre/src/amphitheatre.dart';
+import 'package:amphitheatre/src/amphitheatre_platform.dart';
 import 'package:amphitheatre/src/editor/amphitheatre_editor.dart';
 import 'package:amphitheatre/src/utils.dart';
 import 'package:cross_file/cross_file.dart';
@@ -112,24 +114,39 @@ class AmphitheatreController with ChangeNotifier {
   /// [AmphitheatreController].
   bool get isInitialized => controller.value.isInitialized;
 
+  /// If the underlying [controller] failed to initialize, holds the error
+  /// that it failed with. Otherwise null.
+  Object? get initializationError => _initializationError;
+  Object? _initializationError;
+
+  /// Returns true if the underlying [controller] failed to initialize.
+  bool get hasInitializationError => _initializationError != null;
+
   /// Returns the aspect ratio of the video.
   double get aspectRatio => controller.value.aspectRatio;
 
   bool _initialized = false;
 
   /// Initialize the underlying [controller].
+  ///
+  /// If initialization fails, the failure is surfaced via
+  /// [initializationError] and listeners are notified.
   void initialize({final bool autoPlay = true, final bool looping = false}) {
     // Ensure the controller is not re-initialized when it is already
     // initialized.
     if (_initialized) return;
 
     _initialized = true;
+    _initializationError = null;
 
     controller.addListener(_onControllerUpdate);
     unawaited(controller.setLooping(looping));
 
-    controller.initialize().then((_) {
-        if (autoPlay) play();
+    controller.initialize().then((final _) {
+      if (autoPlay) play();
+    }).catchError((final Object error) {
+      _initializationError = error;
+      notifyListeners();
     });
   }
 
@@ -163,6 +180,7 @@ class AmphitheatreController with ChangeNotifier {
   /// Dispose the underlying [controller], then the [AmphitheatreController].
   @override
   void dispose() {
+    controller.removeListener(_onControllerUpdate);
     unawaited(controller.dispose());
     super.dispose();
 
@@ -171,80 +189,50 @@ class AmphitheatreController with ChangeNotifier {
     _initialized = false;
   }
 
-  /// Fetch the data for the video from the underlying controller (e.g., so it
-  /// can be used by the [AmphitheatreEditor]).
+  String? _materializedAssetPath;
+
+  /// Resolves the path to the video file backing the underlying controller
+  /// (e.g., so it can be exported by the [AmphitheatreEditor] or
+  /// `AmphitheatreExporter`).
   ///
   /// The controller must have been initialized (see [initialize]), or this
-  /// function throws an error.
+  /// function throws a [StateError].
   ///
-  /// This currently only supports [DataSourceType.file] and
-  /// [DataSourceType.asset]. At present, the simplest workaround is to load
-  /// unsupported file types using XFile, then save it into a temporary file and
-  /// then construct a [VideoPlayerController.file] with it, when initializing
-  /// the [AmphitheatreController].
-  Future<AmphitheatreVideo> getVideo() async {
+  /// For [DataSourceType.file] sources this simply resolves the path — no
+  /// video data is read into memory. For [DataSourceType.asset] sources, the
+  /// asset is copied once into Amphitheatre's temporary directory and the
+  /// copy's path is returned. Other source types (e.g., network) are not
+  /// supported: download the video to a file first and use
+  /// [VideoPlayerController.file].
+  Future<String> resolveVideoFilePath() async {
     if (!controller.value.isInitialized) {
       throw StateError('The controller has not been initialized yet.');
     }
 
-    String name;
-    Uint8List data;
-    final Duration duration = controller.value.duration;
-
     switch (controller.dataSourceType) {
       case DataSourceType.file:
-        final Uri uri = Uri.parse(controller.dataSource).normalizePath();
-        name = uri.pathSegments.last;
-        data = await XFile(uri.path).readAsBytes();
+        return Uri.parse(controller.dataSource).toFilePath();
       case DataSourceType.asset:
-        // Assets use keys which are always delimited by a forward slash.
-        name = controller.dataSource.split('/').last;
-        data = Uint8List.view(
-          (await rootBundle.load(controller.dataSource)).buffer,
-        );
-      case DataSourceType.network:
-        // NOTE: Not yet implemented as I didn't want to introduce a dependency
-        // on the HTTP package yet and I haven't considered the final UX 'flow'.
+        if (_materializedAssetPath != null) return _materializedAssetPath!;
 
-        // NOTE: when implementing network, don't forget that the dataSource is
-        // presumably just the URL. In which case, if there are any query
-        // parameters, the platform.splitPath(controller.dataSource).last
-        // heuristic won't work. (It also wouldn't be a backslash on Windows).
-        // So proper URL parsing will need to be used to isolate the path
-        // segment of the URL.
-        throw UnimplementedError(
-          '[Amphitheatre] Data source type not yet supported: network',
+        final AmphitheatrePlatform platform = getAmphitheatrePlatform();
+
+        // Asset keys are always delimited by forward slashes.
+        final String name = controller.dataSource.split('/').last;
+        final String path = platform.joinPath(
+          await platform.getTemporaryDirectory(),
+          'amphitheatre_asset_$name',
         );
+
+        final ByteData data = await rootBundle.load(controller.dataSource);
+        await XFile.fromData(data.buffer.asUint8List()).saveTo(path);
+        return _materializedAssetPath = path;
       default:
         throw UnsupportedError(
-          '[Amphitheatre] Unknown or unsupported data source type: ${controller.dataSourceType}',
+          '[Amphitheatre] Unsupported data source type: '
+          '${controller.dataSourceType}. Save the video to a file and use '
+          'VideoPlayerController.file instead.',
         );
     }
-
-    return AmphitheatreVideo(
-      name: name,
-      data: data,
-      duration: duration,
-    );
   }
-}
-
-/// Holds data about a video being displayed by [Amphitheatre].
-@immutable
-final class AmphitheatreVideo {
-  /// The name of the video file.
-  final String name;
-
-  /// The duration of the video.
-  final Duration duration;
-
-  /// The raw data of the video.
-  final Uint8List data;
-
-  /// Construct an [AmphitheatreVideo].
-  const AmphitheatreVideo({
-    required this.name,
-    required this.duration,
-    required this.data,
-  });
 }

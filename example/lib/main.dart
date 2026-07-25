@@ -95,6 +95,11 @@ class _MyAppHomeState extends State<MyAppHome> {
                         _chosenVideo!,
                       ),
                     ),
+                    options: const AmphitheatreEditorOptions(
+                      // Compress to at most 1080p for upload; use
+                      // `passthrough` for lossless trimming.
+                      exportQuality: AmphitheatreExportQuality.fhd1080,
+                    ),
                   );
 
                   if (editedVideoPath != null) {

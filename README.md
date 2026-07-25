@@ -98,6 +98,48 @@ Alternatively, you can either use `Amphitheatre.consume` to have Amphitheatre as
 that you pass in - or you can simply use `Amphitheatre` with a controller that you manage as part of your own widget's
 lifecycle (and likewise with the `AmphitheatreEditor`).
 
+### Exporting and compression
+
+The editor trims (and optionally compresses) with the platform's native media frameworks
+([`androidx.media3` Transformer](https://developer.android.com/media/media3/transformer) on Android,
+`AVAssetExportSession` on iOS). Video data is streamed — never loaded into memory — and the work runs off the UI
+thread, so arbitrarily large videos are safe. Output is a fast-start (streamable) MP4 and the input file is never
+modified or deleted.
+
+Pick an export quality via the editor options:
+
+```dart
+AmphitheatreEditor.launch(
+  context,
+  controller: ...,
+  options: const AmphitheatreEditorOptions(
+    // `passthrough` (default) trims losslessly without re-encoding.
+    // 2160p / 1080p / 720p transcode to H.264/AAC, scaling down if needed.
+    exportQuality: AmphitheatreExportQuality.fhd1080,
+  ),
+);
+```
+
+You can also export directly, without the editor UI:
+
+```dart
+final session = AmphitheatreExporter.start(
+  inputPath: myVideo.path,
+  start: const Duration(seconds: 2),
+  end: const Duration(seconds: 32),
+  quality: AmphitheatreExportQuality.hd720,
+);
+
+session.progress.listen((progress) => debugPrint('${(progress * 100).round()}%'));
+
+try {
+  final outputPath = await session.result;
+  // Upload/consume outputPath...
+} on AmphitheatreExportException catch (e) {
+  if (!e.wasCancelled) debugPrint('Export failed: ${e.code} ${e.message}');
+}
+```
+
 ### Localization (l10n) Support
 
 This package has built-in support for `flutter_localizations`, with the long-term goal of getting any community-sourced

@@ -1,7 +1,7 @@
 {
     "cancel": "Cancel",
     "@cancel": {
-        "description": "Label for the cancel button. This replaces the close button in the editor."
+        "description": "Label for the cancel button. This replaces the close button in the editor and cancels a running export."
     },
     "close": "Close",
     "@close": {
@@ -33,7 +33,7 @@
     },
     "exportingVideo": "Exporting video ({progress})...",
     "@exportingVideo": {
-        "description": "Label indicating the progress when exporting a video with percentage progress.",
+        "description": "Accessibility label describing the progress while exporting a video, with percentage progress.",
         "placeholders": {
             "progress": {
                 "type": "double",
@@ -43,5 +43,48 @@
                 }
             }
         }
+    },
+    "exportingVideoTitle": "Exporting video…",
+    "@exportingVideoTitle": {
+        "description": "Title shown on the export progress screen while the video is being exported."
+    },
+    "progressPercent": "{progress}",
+    "@progressPercent": {
+        "description": "A percentage, shown inside the export progress ring.",
+        "placeholders": {
+            "progress": {
+                "type": "double",
+                "format": "percentPattern"
+            }
+        }
+    },
+    "exportFailedTitle": "Export didn't finish",
+    "@exportFailedTitle": {
+        "description": "Title shown when exporting the video failed."
+    },
+    "exportFailedBody": "Something went wrong while processing the video. Your original video hasn't been changed.",
+    "@exportFailedBody": {
+        "description": "Body text shown when exporting the video failed, reassuring the user that the source video is intact."
+    },
+    "retry": "Try again",
+    "@retry": {
+        "description": "Label for the button that retries a failed export."
+    },
+    "backToEditor": "Back to editor",
+    "@backToEditor": {
+        "description": "Label for the button that dismisses the export failure screen and returns to the editor."
+    },
+    "selectedDuration": "{time} selected",
+    "@selectedDuration": {
+        "description": "Shown under the trim timeline, indicating the length of the current selection (e.g., '00:42 selected').",
+        "placeholders": {
+            "time": {
+                "type": "String"
+            }
+        }
+    },
+    "videoLoadFailed": "This video can't be played.",
+    "@videoLoadFailed": {
+        "description": "Shown in the player when the video failed to load."
     }
 }

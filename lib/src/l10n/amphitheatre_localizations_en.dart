@@ -44,4 +44,35 @@ class AmphitheatreLocalizationsEn extends AmphitheatreLocalizations {
 
     return 'Exporting video ($progressString)...';
   }
+
+  @override
+  String get exportingVideoTitle => 'Exporting video…';
+
+  @override
+  String progressPercent(double progress) {
+    final intl.NumberFormat progressNumberFormat = intl.NumberFormat.percentPattern(localeName);
+    final String progressString = progressNumberFormat.format(progress);
+
+    return '$progressString';
+  }
+
+  @override
+  String get exportFailedTitle => 'Export didn\'t finish';
+
+  @override
+  String get exportFailedBody => 'Something went wrong while processing the video. Your original video hasn\'t been changed.';
+
+  @override
+  String get retry => 'Try again';
+
+  @override
+  String get backToEditor => 'Back to editor';
+
+  @override
+  String selectedDuration(String time) {
+    return '$time selected';
+  }
+
+  @override
+  String get videoLoadFailed => 'This video can\'t be played.';
 }

@@ -1,10 +1,8 @@
-import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
-
 group = "xyz.apollosoftware.amphitheatre"
 version = "1.0-SNAPSHOT"
 
 buildscript {
-    ext.kotlin_version = "2.0"
+    ext.kotlin_version = "2.1.0"
 
     repositories {
         google()
@@ -12,8 +10,8 @@ buildscript {
     }
 
     dependencies {
-        classpath("com.android.tools.build:gradle:8.1.4")
-        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:2.0.21")
+        classpath("com.android.tools.build:gradle:8.7.3")
+        classpath("org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version")
     }
 }
 
@@ -30,16 +28,15 @@ apply plugin: "kotlin-android"
 android {
     namespace = "xyz.apollosoftware.amphitheatre"
 
-    compileSdk = 35
+    compileSdk = 36
 
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
 
     kotlinOptions {
-        languageVersion = kotlin_version
-        jvmTarget = JavaVersion.VERSION_11
+        jvmTarget = "17"
     }
 
     sourceSets {
@@ -49,11 +46,6 @@ android {
 
     defaultConfig {
         minSdk = 21
-    }
-
-    dependencies {
-        testImplementation("org.jetbrains.kotlin:kotlin-test")
-        testImplementation("org.mockito:mockito-core:5.14.2")
     }
 
     testOptions {
@@ -67,4 +59,13 @@ android {
             }
         }
     }
+}
+
+dependencies {
+    implementation("androidx.media3:media3-transformer:1.10.1")
+    implementation("androidx.media3:media3-effect:1.10.1")
+    implementation("androidx.media3:media3-common:1.10.1")
+
+    testImplementation("org.jetbrains.kotlin:kotlin-test")
+    testImplementation("org.mockito:mockito-core:5.14.2")
 }

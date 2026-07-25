@@ -1,7 +1,8 @@
 package xyz.apollosoftware.amphitheatre
 
-import android.app.Activity
-import io.flutter.embedding.engine.plugins.activity.ActivityPluginBinding
+import android.content.Context
+import io.flutter.embedding.engine.plugins.FlutterPlugin
+import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import org.junit.jupiter.api.BeforeEach
@@ -15,39 +16,41 @@ import kotlin.test.Test
 
 internal class AmphitheatrePluginTest {
   private lateinit var plugin: AmphitheatrePlugin
-  private lateinit var mockActivity: Activity
-  private lateinit var mockBinding: ActivityPluginBinding
+  private lateinit var mockContext: Context
+  private lateinit var mockBinding: FlutterPlugin.FlutterPluginBinding
 
   @BeforeEach
   fun prepareTests() {
     plugin = AmphitheatrePlugin()
-    mockActivity = mock(Activity::class.java)
-    mockBinding = mock(ActivityPluginBinding::class.java)
-    upon(mockBinding.activity).thenReturn(mockActivity)
-    plugin.onAttachedToActivity(mockBinding)
+    mockContext = mock(Context::class.java)
+    mockBinding = mock(FlutterPlugin.FlutterPluginBinding::class.java)
+    upon(mockBinding.applicationContext).thenReturn(mockContext)
+    upon(mockBinding.binaryMessenger).thenReturn(mock(BinaryMessenger::class.java))
+    plugin.onAttachedToEngine(mockBinding)
   }
 
   @Test
-  fun handlesUnboundActivity() {
-    // Rebuild the test mocks so that we get a fresh AmphitheatrePlugin instance where the
-    // mockActivity has not yet been bound.
+  fun handlesDetachedEngine() {
+    // A plugin that was never attached (or has been detached) must answer
+    // with an error rather than crashing.
     plugin = AmphitheatrePlugin()
-    mockActivity = mock(Activity::class.java)
-    upon(mockBinding.activity).thenReturn(mockActivity)
 
-    val call = MethodCall("anything__thisIsNotARealAction", null)
-
+    val call = MethodCall("getTemporaryDirectory", null)
     val mockResult: MethodChannel.Result = mock(MethodChannel.Result::class.java)
     plugin.onMethodCall(call, mockResult)
 
-    verify(mockResult).error("ERR_BAD_ACCESS", "There is no activity to bind the action to.", null)
+    verify(mockResult).error(
+      ErrorCodes.INIT_FAILED,
+      "The plugin is not attached to an engine.",
+      null,
+    )
   }
 
   @Test
   fun getTemporaryDirectory_returnsExpectedValue() {
     val call = MethodCall("getTemporaryDirectory", null)
 
-    upon(mockActivity.cacheDir).thenReturn(File("/foo/bar/cache"))
+    upon(mockContext.cacheDir).thenReturn(File("/foo/bar/cache"))
 
     val mockResult: MethodChannel.Result = mock(MethodChannel.Result::class.java)
     plugin.onMethodCall(call, mockResult)
@@ -56,18 +59,79 @@ internal class AmphitheatrePluginTest {
   }
 
   @Test
-  fun cropVideo_handlesIllegalArguments() {
+  fun startExport_handlesIllegalArguments() {
     val mockResult: MethodChannel.Result = mock(MethodChannel.Result::class.java)
-    fun createCall(args: Map<String, Any?>?) = MethodCall("cropVideo", args)
+    fun createCall(args: Map<String, Any?>?) = MethodCall("startExport", args)
+
+    val valid = mapOf(
+      "id" to "1", "inputPath" to "/foo/in.mp4", "outputPath" to "/foo/out.mp4",
+      "startMs" to 0, "endMs" to 1000, "quality" to "passthrough",
+    )
 
     plugin.onMethodCall(createCall(null), mockResult)
-    plugin.onMethodCall(createCall(mapOf("foo" to "bar")), mockResult)
-    plugin.onMethodCall(createCall(mapOf("path" to null, "start" to 1, "end" to 2)), mockResult)
-    plugin.onMethodCall(createCall(mapOf("path" to "/foo/bar", "start" to null, "end" to 2)), mockResult)
-    plugin.onMethodCall(createCall(mapOf("path" to "/foo/bar", "start" to 1, "end" to null)), mockResult)
-    plugin.onMethodCall(createCall(mapOf("path" to "/foo/bar", "start" to null, "end" to null)), mockResult)
+    plugin.onMethodCall(createCall(valid - "id"), mockResult)
+    plugin.onMethodCall(createCall(valid - "inputPath"), mockResult)
+    plugin.onMethodCall(createCall(valid - "outputPath"), mockResult)
+    plugin.onMethodCall(createCall(valid - "quality"), mockResult)
+    // End before start.
+    plugin.onMethodCall(createCall(valid + mapOf("startMs" to 1000, "endMs" to 1000)), mockResult)
+    // Negative bounds.
+    plugin.onMethodCall(createCall(valid + mapOf("startMs" to -1)), mockResult)
 
-    verify(mockResult, times(6)).error("ERR_BAD_PARAMS", "Invalid parameters supplied to cropVideo()", null)
+    verify(mockResult, times(7))
+      .error(ErrorCodes.BAD_PARAMS, "Invalid parameters supplied to startExport()", null)
+
+    // An unknown quality is also a parameter error (different message).
+    plugin.onMethodCall(createCall(valid + mapOf("quality" to "potato")), mockResult)
+    verify(mockResult).error(ErrorCodes.BAD_PARAMS, "Unknown quality: potato", null)
+  }
+
+  @Test
+  fun startExport_reportsMissingFile() {
+    val mockResult: MethodChannel.Result = mock(MethodChannel.Result::class.java)
+    plugin.onMethodCall(
+      MethodCall(
+        "startExport",
+        mapOf(
+          "id" to "1",
+          "inputPath" to "/definitely/not/a/real/file.mp4",
+          "outputPath" to "/foo/out.mp4",
+          "startMs" to 0,
+          "endMs" to 1000,
+          "quality" to "passthrough",
+        ),
+      ),
+      mockResult,
+    )
+
+    verify(mockResult).error(ErrorCodes.NOT_FOUND, "Failed to locate the provided file.", null)
+  }
+
+  @Test
+  fun cancelExport_returnsFalseForUnknownId() {
+    val mockResult: MethodChannel.Result = mock(MethodChannel.Result::class.java)
+    plugin.onMethodCall(MethodCall("cancelExport", mapOf("id" to "nope")), mockResult)
+    verify(mockResult).success(false)
+  }
+
+  @Test
+  fun getThumbnails_handlesIllegalArguments() {
+    val mockResult: MethodChannel.Result = mock(MethodChannel.Result::class.java)
+    fun createCall(args: Map<String, Any?>?) = MethodCall("getThumbnails", args)
+
+    plugin.onMethodCall(createCall(null), mockResult)
+    plugin.onMethodCall(createCall(mapOf("path" to "/foo.mp4", "count" to 0, "maxHeight" to 100)), mockResult)
+    plugin.onMethodCall(createCall(mapOf("path" to "/foo.mp4", "count" to 5, "maxHeight" to 0)), mockResult)
+
+    verify(mockResult, times(3))
+      .error(ErrorCodes.BAD_PARAMS, "Invalid parameters supplied to getThumbnails()", null)
+  }
+
+  @Test
+  fun unknownMethod_isNotImplemented() {
+    val mockResult: MethodChannel.Result = mock(MethodChannel.Result::class.java)
+    plugin.onMethodCall(MethodCall("anything__thisIsNotARealAction", null), mockResult)
+    verify(mockResult).notImplemented()
   }
 
   /** Not a fan of the backticks... See [Mockito.when] */
