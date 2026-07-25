@@ -252,6 +252,19 @@ Widget _buildAmphitheatreExporterProgress(
     AmphitheatreExporterProgress(state: state);
 
 /// The Amphitheatre video editor.
+///
+/// The editor wraps the [Amphitheatre] player with a trim timeline (an
+/// [AmphitheatreEditorSlider]) and a Done button. When the user accepts their
+/// changes, the editor resolves the video's file path, hands it to
+/// [AmphitheatreExporter] (trimming to the selection and applying
+/// [AmphitheatreEditorOptions.exportQuality]), and shows the
+/// [buildExporterProgress] screen — with live progress and a cancel action —
+/// until the export finishes. On success the editor pops with the output
+/// path; on failure it shows a recovery screen (retry / back to editor); on
+/// cancellation it returns to editing.
+///
+/// If nothing needs to be done (no trim and passthrough quality), the editor
+/// pops with the original file's path without invoking the platform at all.
 class AmphitheatreEditor extends StatefulWidget {
   /// The controller for the [Amphitheatre] player.
   final AmphitheatreController controller;
@@ -359,6 +372,14 @@ class _AmphitheatreEditorState extends State<AmphitheatreEditor> {
   final AmphitheatreEditorController editorController =
       AmphitheatreEditorController();
 
+  // The export state machine:
+  //  * _exportRequested is true from the moment the user taps Done until the
+  //    editor either pops (success) or returns to editing (cancellation).
+  //  * _exportSession exists only while the platform is actually exporting.
+  //  * _exportError switches the export screen into its failure/recovery
+  //    state; it is cleared by retrying or going back to the editor.
+  // The export screen is shown whenever _showExportScreen is true; otherwise
+  // the editing UI is shown.
   AmphitheatreExportSession? _exportSession;
   StreamSubscription<double>? _progressSubscription;
   double? _exportProgress;
@@ -767,10 +788,17 @@ enum _AmphitheatreEditorSliderDragMode {
   /// In-between the crop handles (the "intersection").
   cropIntersection;
 
+  /// True for a drag of exactly one crop handle.
   bool get isCropHandleOnly => this == cropStart || this == cropEnd;
+
+  /// True for any crop-related drag (a handle, or the whole selection).
   bool get isCrop => isCropHandleOnly || this == cropIntersection;
 
+  /// True when the drag moves the selection's start (a start-handle drag, or
+  /// a whole-selection drag which moves both ends together).
   bool get isCropStart => this == cropStart || this == cropIntersection;
+
+  /// True when the drag moves the selection's end. See [isCropStart].
   bool get isCropEnd => this == cropEnd || this == cropIntersection;
 }
 
@@ -1123,6 +1151,17 @@ class _AmphitheatreEditorSliderState extends State<AmphitheatreEditorSlider> {
 
   int get _max => widget.controller.duration.inMilliseconds;
 
+  /// Routes a gesture on the timeline.
+  ///
+  /// A gesture is classified once, on its first event ([isStart]), into a
+  /// [_AmphitheatreEditorSliderDragMode] based on where it began: on a crop
+  /// handle, inside the selection, or elsewhere (the playback head). Later
+  /// events in the same gesture keep that classification, and the crop values
+  /// captured at the gesture's start ([_cachedCropStart]/[_cachedCropEnd])
+  /// are the reference that the total drag distance is applied to — which
+  /// keeps the handles glued to the finger rather than accumulating rounding
+  /// error. The final event ([isEnd]) commits the result as a single undo
+  /// step.
   void _processInteraction(
     final Size size, {
     required final Offset localPosition,
@@ -1178,6 +1217,13 @@ class _AmphitheatreEditorSliderState extends State<AmphitheatreEditorSlider> {
     }
   }
 
+  /// Applies a crop drag: converts the drag distance to a time delta, moves
+  /// the dragged end(s), then clamps the selection to the video bounds and to
+  /// [AmphitheatreEditorOptions.minLength]/[AmphitheatreEditorOptions.maxLength]
+  /// (pushing the opposite handle along when a limit is hit).
+  ///
+  /// The change is applied without committing — [_processInteraction] commits
+  /// once, when the gesture ends.
   void _handleNewCropPosition(
     final _SliderMetrics metrics, {
     required final _AmphitheatreEditorSliderDragMode dragMode,
@@ -1272,6 +1318,8 @@ class _AmphitheatreEditorSliderState extends State<AmphitheatreEditorSlider> {
         : cropStart);
   }
 
+  /// Scrubs the playback head to the tapped/dragged position, pausing while
+  /// the user holds it and resuming when they let go.
   void _handleNewPlayerPosition(
     final _SliderMetrics metrics, {
     required final Offset localPosition,
@@ -1425,6 +1473,9 @@ class _AmphitheatreEditorSliderState extends State<AmphitheatreEditorSlider> {
       );
 }
 
+/// Paints the timeline itself: the track fill, the filmstrip thumbnails, the
+/// playback head, and the outer border. The crop selection is painted on top
+/// by [_AmphitheatreEditorSliderCropPainter].
 class _AmphitheatreEditorSliderPainter extends CustomPainter {
   final int value;
   final int max;
@@ -1538,6 +1589,10 @@ class _AmphitheatreEditorSliderPainter extends CustomPainter {
   }
 }
 
+/// Paints the crop selection over the timeline: a dimming scrim outside the
+/// selection, thin frame bars along its top and bottom edges, and the two
+/// grab handles (with their chevron icons). Also owns the hit-testing that
+/// decides whether a touch belongs to the crop UI.
 class _AmphitheatreEditorSliderCropPainter extends CustomPainter {
   final Size size;
   final AmphitheatreEditorStyle style;

@@ -1,3 +1,8 @@
+// Covers the editor's modification state: crop application, the
+// commit/undo model (drags coalesce into single undo steps; history is
+// bounded), the markInitial baseline, and the AmphitheatreEditorOptions
+// auto-accept/equality semantics.
+//
 // Test sources are not part of the public API surface.
 // ignore_for_file: public_member_api_docs
 

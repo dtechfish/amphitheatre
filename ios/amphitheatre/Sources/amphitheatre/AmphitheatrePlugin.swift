@@ -14,19 +14,35 @@ enum ErrorCodes {
     static let initFailed = "ERR_INIT_FAIL"
 }
 
-/// AmphitheatrePlugin.
+/// AmphitheatrePlugin — the iOS half of the Amphitheatre platform channel.
 ///
-/// Exports run through AVAssetExportSession, which performs its work off the
-/// main thread internally. All Flutter callbacks (`FlutterResult` and
-/// `FlutterEventSink`) are dispatched on the main thread, as required by the
-/// Flutter engine. The plugin never deletes or modifies the input file of an
-/// export.
+/// Wire contract (mirrored by the Dart `AmphitheatrePlatformMethodChannel`
+/// and the Android plugin):
+///  - Methods on the `PLUGIN_BUNDLE_ID` channel: `getTemporaryDirectory`,
+///    `startExport`, `cancelExport`, `getThumbnails`.
+///  - `startExport` holds its `FlutterResult` open and answers with the
+///    output path only once the export completes (or fails / is cancelled).
+///  - Progress events go out on `PLUGIN_EVENT_CHANNEL` as maps of
+///    `{id: String, progress: Double}` in the range 0...1.
+///  - Failures use the `ErrorCodes` values as the error code.
+///
+/// Threading: exports run through AVAssetExportSession, which performs its
+/// work off the main thread internally. All Flutter callbacks
+/// (`FlutterResult` and `FlutterEventSink`) are dispatched on the main
+/// thread, as required by the Flutter engine.
+///
+/// The plugin never deletes or modifies the input file of an export.
 public class AmphitheatrePlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
     private var eventSink: FlutterEventSink?
 
     /// Active exports keyed by export ID. Only accessed on the main thread.
     private var activeExports: [String: ActiveExport] = [:]
 
+    /// Everything needed to finish or cancel a running export: the session
+    /// doing the work, the Task awaiting it (cancelling the Task aborts the
+    /// export on iOS 18+), and a flag marking that the user cancelled — which
+    /// decides whether the outcome is reported as a failure or a
+    /// cancellation.
     private final class ActiveExport {
         let session: AVAssetExportSession
         var task: Task<Void, Never>?
@@ -76,6 +92,9 @@ public class AmphitheatrePlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
 
     // MARK: - getTemporaryDirectory
 
+    /// Answers with a package-specific directory inside the user Caches
+    /// directory, creating it if needed. Exports and asset copies are written
+    /// here; the OS may reclaim it when storage runs low.
     private func getTemporaryDirectory(result: @escaping FlutterResult) {
         let cachesDirectory = NSSearchPathForDirectoriesInDomains(.cachesDirectory, .userDomainMask, true)
 
@@ -99,6 +118,14 @@ public class AmphitheatrePlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
 
     // MARK: - startExport
 
+    /// Starts an export: validates the arguments, configures an
+    /// AVAssetExportSession for the requested trim + quality, and hands off
+    /// to `runExport` in a Task (which answers `result` when done).
+    ///
+    /// Quality mapping: `passthrough` uses the passthrough preset (no
+    /// re-encode); the named resolutions use the matching AVFoundation
+    /// presets, which scale down but never up. `shouldOptimizeForNetworkUse`
+    /// gives every output a fast-start (streamable) MP4 layout.
     private func startExport(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
         guard let args = call.arguments as? [String: Any],
               let id = args["id"] as? String,
@@ -180,6 +207,13 @@ public class AmphitheatrePlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
         result(FlutterError(code: ErrorCodes.badParams, message: "Invalid parameters supplied to startExport()", details: nil))
     }
 
+    /// Runs the export to completion and reports the outcome.
+    ///
+    /// On iOS 18+ this uses the modern `export(to:as:)` API (which aborts
+    /// when its Task is cancelled); on earlier versions it falls back to the
+    /// classic session API and reads `status` afterwards. Either way, the
+    /// outcome funnels through `completeExport` on the main thread, exactly
+    /// once.
     private func runExport(
         id: String,
         session: AVAssetExportSession,
@@ -264,6 +298,9 @@ public class AmphitheatrePlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
 
     // MARK: - cancelExport
 
+    /// Cancels a running export. The export's own completion path then
+    /// reports `ERR_CANCELLED` to its pending result and deletes the partial
+    /// output. Answers `true` if there was an export to cancel.
     private func cancelExport(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
         guard let args = call.arguments as? [String: Any],
               let id = args["id"] as? String
@@ -290,6 +327,11 @@ public class AmphitheatrePlugin: NSObject, FlutterPlugin, FlutterStreamHandler {
 
     // MARK: - getThumbnails
 
+    /// Extracts evenly spaced JPEG thumbnails for the editor's filmstrip
+    /// (sampled at the midpoint of each cell), scaled to the requested
+    /// height. Individual frame failures are skipped and a total failure
+    /// returns an empty list — the Dart side treats thumbnails as a
+    /// progressive enhancement, never an error.
     private func getThumbnails(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
         guard let args = call.arguments as? [String: Any],
               let path = args["path"] as? String,

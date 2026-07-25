@@ -14,6 +14,12 @@ import org.mockito.stubbing.OngoingStubbing
 import java.io.File
 import kotlin.test.Test
 
+/**
+ * Covers the plugin's channel-facing behavior that can run on the JVM:
+ * argument validation, the temporary-directory path, missing-file and
+ * aliased-path rejection, and unknown-method handling. Anything that touches
+ * media3 or the Android media stack needs an instrumentation test instead.
+ */
 internal class AmphitheatrePluginTest {
   private lateinit var plugin: AmphitheatrePlugin
   private lateinit var mockContext: Context

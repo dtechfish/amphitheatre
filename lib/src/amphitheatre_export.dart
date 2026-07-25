@@ -138,6 +138,25 @@ final class AmphitheatreExportSession {
 /// The heavy lifting happens off the UI thread on the platform side and video
 /// data is streamed rather than loaded into memory, so exports of arbitrarily
 /// large files are safe.
+///
+/// Example:
+///
+/// ```dart
+/// final session = AmphitheatreExporter.start(
+///   inputPath: video.path,
+///   start: const Duration(seconds: 2),
+///   end: const Duration(seconds: 32),
+///   quality: AmphitheatreExportQuality.fhd1080,
+/// );
+///
+/// session.progress.listen((p) => print('${(p * 100).round()}%'));
+///
+/// try {
+///   final outputPath = await session.result;
+/// } on AmphitheatreExportException catch (e) {
+///   if (!e.wasCancelled) print('Failed: ${e.code}');
+/// }
+/// ```
 abstract final class AmphitheatreExporter {
   static int _sessionCounter = 0;
 

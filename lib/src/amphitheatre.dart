@@ -308,6 +308,8 @@ class _AmphitheatreState extends State<Amphitheatre> {
               child: Container(
                 color: Colors.transparent,
                 child: Center(
+                  // If the video failed to load, show a message instead of a
+                  // black screen with controls that can never activate.
                   child: widget.controller.hasInitializationError
                       ? Padding(
                           padding: const EdgeInsets.all(32),

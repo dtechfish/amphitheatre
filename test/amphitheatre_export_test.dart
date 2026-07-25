@@ -1,3 +1,8 @@
+// Covers the export session lifecycle against a fake platform: argument
+// validation and pass-through, progress routing (only this session's events,
+// plus the final 1.0), success and typed-failure completion, and
+// cancellation semantics.
+//
 // Test sources are not part of the public API surface.
 // ignore_for_file: public_member_api_docs
 

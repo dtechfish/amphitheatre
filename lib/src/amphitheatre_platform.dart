@@ -174,6 +174,17 @@ abstract final class AmphitheatreErrorCodes {
 
 /// The default implementation of [AmphitheatrePlatform], using Flutter's
 /// [MethodChannel] API.
+///
+/// The wire contract (mirrored exactly by the Android and iOS plugins):
+///
+/// * Methods on the `xyz.apollosoftware.amphitheatre` channel:
+///   `getTemporaryDirectory`, `startExport`, `cancelExport`, `getThumbnails`.
+/// * The `startExport` reply is deferred: the platform answers with the
+///   output path only once the export has finished (or fails/cancels).
+/// * Progress arrives on the `xyz.apollosoftware.amphitheatre/events`
+///   [EventChannel] as maps of `{id: String, progress: double}`.
+/// * Failures surface as [PlatformException]s whose `code` is one of the
+///   [AmphitheatreErrorCodes] values.
 final class AmphitheatrePlatformMethodChannel extends AmphitheatrePlatform {
   static const MethodChannel _channel =
       MethodChannel('xyz.apollosoftware.amphitheatre');

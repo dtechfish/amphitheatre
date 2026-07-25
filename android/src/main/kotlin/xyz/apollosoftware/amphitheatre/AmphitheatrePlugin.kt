@@ -43,13 +43,23 @@ object ErrorCodes {
 }
 
 /**
- * AmphitheatrePlugin.
+ * AmphitheatrePlugin — the Android half of the Amphitheatre platform channel.
  *
- * Exports run through androidx.media3 Transformer, which performs its work on
- * background threads internally; this class only ever does lightweight
- * bookkeeping on the main thread (as required by both Transformer and
- * Flutter's platform channels). Thumbnail extraction runs on a dedicated
- * background executor.
+ * Wire contract (mirrored by the Dart `AmphitheatrePlatformMethodChannel` and
+ * the iOS plugin):
+ *  - Methods on [kChannelName]: `getTemporaryDirectory`, `startExport`,
+ *    `cancelExport`, `getThumbnails`.
+ *  - `startExport` holds its [Result] open and answers with the output path
+ *    only once the export completes (or fails / is cancelled).
+ *  - Progress events go out on [kEventChannelName] as maps of
+ *    `{id: String, progress: Double}` in the range 0..1.
+ *  - Failures use the [ErrorCodes] values as the error code.
+ *
+ * Threading: exports run through androidx.media3 Transformer, which performs
+ * its work on background threads internally; this class only ever does
+ * lightweight bookkeeping on the main thread (as required by both Transformer
+ * and Flutter's platform channels). Thumbnail extraction runs on a dedicated
+ * background executor, with results posted back to the main thread.
  *
  * The plugin never deletes or modifies the input file of an export.
  */
@@ -70,6 +80,11 @@ class AmphitheatrePlugin : FlutterPlugin, MethodCallHandler, EventChannel.Stream
   /** Active exports, keyed by export ID. Only accessed from the main thread. */
   private val activeExports = HashMap<String, ActiveExport>()
 
+  /**
+   * Everything needed to finish, fail, or cancel a running export: the
+   * [transformer] doing the work, the still-open Flutter [result] awaiting
+   * the outcome, and the [outputFile] to clean up on failure/cancellation.
+   */
   private class ActiveExport(
     val transformer: Transformer,
     val result: Result,
@@ -125,6 +140,11 @@ class AmphitheatrePlugin : FlutterPlugin, MethodCallHandler, EventChannel.Stream
     }
   }
 
+  /**
+   * Answers with a package-specific directory inside the app's cache dir,
+   * creating it if needed. Exports and asset copies are written here; the OS
+   * may reclaim it when storage runs low.
+   */
   private fun getTemporaryDirectory(result: Result) {
     val context = this.context
       ?: return result.error(ErrorCodes.INIT_FAILED, "The plugin is not attached to an engine.", null)
@@ -134,6 +154,16 @@ class AmphitheatrePlugin : FlutterPlugin, MethodCallHandler, EventChannel.Stream
     result.success(cacheDir.absolutePath)
   }
 
+  /**
+   * Starts an export: validates the arguments, builds a media3 Transformer
+   * for the requested trim + quality, kicks it off, and registers the export
+   * so progress polling, completion, and cancellation can find it.
+   *
+   * Quality mapping: `passthrough` stream-copies the source (with media3's
+   * trim optimization, which re-encodes at most the first GOP so trims stay
+   * accurate); the named resolutions transcode to H.264/AAC, scaling down —
+   * never up. The [result] is answered later, by the Transformer listener.
+   */
   private fun startExport(call: MethodCall, result: Result) {
     val context = this.context
       ?: return result.error(ErrorCodes.INIT_FAILED, "The plugin is not attached to an engine.", null)
@@ -280,6 +310,12 @@ class AmphitheatrePlugin : FlutterPlugin, MethodCallHandler, EventChannel.Stream
     }
   }
 
+  /**
+   * Polls the transformer every [progressIntervalMs] and forwards progress to
+   * the Dart side as `{id, progress}` events. The loop stops on its own once
+   * the export is no longer in [activeExports] (completed, failed, or
+   * cancelled).
+   */
   private fun scheduleProgressUpdates(id: String) {
     val progressHolder = ProgressHolder()
 
@@ -299,6 +335,11 @@ class AmphitheatrePlugin : FlutterPlugin, MethodCallHandler, EventChannel.Stream
     mainHandler.post(poll)
   }
 
+  /**
+   * Cancels a running export: stops the transformer, deletes the partial
+   * output, and fails the export's pending result with [ErrorCodes.CANCELLED].
+   * Answers `true` if there was an export to cancel, `false` otherwise.
+   */
   private fun cancelExport(call: MethodCall, result: Result) {
     val id = call.argument<String>("id")
       ?: return result.error(ErrorCodes.BAD_PARAMS, "Invalid parameters supplied to cancelExport()", null)
@@ -321,6 +362,10 @@ class AmphitheatrePlugin : FlutterPlugin, MethodCallHandler, EventChannel.Stream
     complete(export)
   }
 
+  /**
+   * Extracts evenly spaced JPEG thumbnails for the editor's filmstrip, on the
+   * background executor. See [extractThumbnails] for the extraction rules.
+   */
   private fun getThumbnails(call: MethodCall, result: Result) {
     val path = call.argument<String>("path")
     val count = call.argument<Number>("count")?.toInt()
@@ -405,6 +450,11 @@ class AmphitheatrePlugin : FlutterPlugin, MethodCallHandler, EventChannel.Stream
     return thumbnails
   }
 
+  /**
+   * Decodes one frame near [timeUs], pre-scaled by the decoder to fit
+   * [maxHeight] where the platform supports it (API 27+); older devices
+   * decode full-size and are scaled down by the caller.
+   */
   private fun frameAt(retriever: MediaMetadataRetriever, timeUs: Long, maxHeight: Int): Bitmap? {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
       val rawHeight = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull()
