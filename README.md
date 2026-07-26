@@ -34,7 +34,7 @@ A Flutter video player and editor.
         </tr>
         <tr>
             <td><b>Supported Versions</b></td>
-            <td>SDK 21+</td>
+            <td>SDK 23+ &dagger;</td>
             <td>13.0+ *</td>
         </tr>
         <tr>
@@ -47,6 +47,9 @@ A Flutter video player and editor.
 
 <small>* NB: support for older versions can be implemented if needed, it has been omitted at present for simplicity of
 the platform channel implementation.</small>
+
+<small>&dagger; Raised from SDK 21 in v0.1.0: androidx.media3 1.10 (which powers exporting) enforces minSdk 23, per
+the AndroidX baseline policy. Android 6.0 (2015) covers effectively all active devices.</small>
 
 ## Quick Start
 

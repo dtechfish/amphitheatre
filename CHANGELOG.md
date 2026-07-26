@@ -41,6 +41,10 @@ off the UI thread.
 * Editor auto-accept of short videos is now opt-in via
   `AmphitheatreEditorOptions.autoAcceptShortVideos` (it was documented but
   never implemented before).
+* Android `minSdk` raised from 21 to 23 — required by androidx.media3 1.10
+  (the AndroidX baseline policy moved to 23 in mid-2025). Media3 itself is
+  self-contained: no Google Play Services dependency and no bundled native
+  libraries.
 * Requires Flutter 3.27+.
 
 ## 0.0.3

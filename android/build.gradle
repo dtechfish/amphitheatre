@@ -45,7 +45,9 @@ android {
     }
 
     defaultConfig {
-        minSdk = 21
+        // androidx.media3 1.10.x enforces minSdk 23 (the AndroidX baseline
+        // was raised from 21 to 23 in mid-2025).
+        minSdk = 23
     }
 
     testOptions {
