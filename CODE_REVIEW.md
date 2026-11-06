@@ -155,11 +155,11 @@ A full second-pass review of the rewrite diff found and fixed:
 Known considerations (accepted, documented):
 
 - iOS passthrough preset with `.mp4` output can fail for exotic `.mov` contents (e.g., ProRes, timecode tracks). The failure surfaces cleanly in the retry UI; selecting a transcoding quality is the workaround. A `supportedFileTypes` check with a `.mov` fallback could be added later.
-- Android reads video metadata (height/rotation) on the platform thread before a transcode — header-only, milliseconds, accepted.
-- Trim start snaps to the nearest sync frame in pure-passthrough scenarios on iOS; on Android, media3's trim optimization re-encodes only the first GOP for accurate starts.
+- Android reads video metadata (height/rotation) on the platform thread before a transcode, and the sync sample for a passthrough trim start (, sample table) likewise — header-only, milliseconds on a 1 GB clip, accepted; a multi-GB chapter may want it off the main thread.
+- Trim start snaps to the sync frame at or before the handle in pure-passthrough scenarios on both platforms (Android: `setStartsAtKeyFrame(true)`; media3 otherwise transcodes any clip whose start is past zero, and its trim optimization fell back to exactly that on a 5.3K HEVC GoPro clip, 2026-11-05, so it is not enabled).
 - `example/test/widget_test.dart` is stale (pre-dates the rewrite; asserts "Running on:" text that the example never renders). Left untouched; worth replacing when the example is next revised.
 
-Still to verify on a machine with the Flutter SDK: `flutter analyze`, `flutter test`, `flutter gen-l10n` (generated files were maintained by hand), an Android build against media3 `1.10.1` (confirm artifact resolves and `experimentalSetTrimOptimizationEnabled` still bears that name), an iOS `pod install`/build, and a real-device export of a multi-GB video on both platforms.
+Still to verify on a machine with the Flutter SDK: `flutter analyze`, `flutter test`, `flutter gen-l10n` (generated files were maintained by hand), an Android build against media3 `1.10.1`, an iOS `pod install`/build, and a real-device export of a multi-GB video on both platforms.
 
 ## 7. Final review (cross-layer audit + independent model review)
 

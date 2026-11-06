@@ -107,7 +107,8 @@ abstract class AmphitheatrePlatform extends PlatformInterface {
   /// Start exporting the video at [inputPath] to [outputPath].
   ///
   /// The video is trimmed to the range `[startMs, endMs]` (either bound may be
-  /// null to keep that side of the video) and processed according to
+  /// null to keep that side of the video; a passthrough export starts at the
+  /// video key frame at or before `startMs`) and processed according to
   /// [quality].
   ///
   /// The returned future completes with the output path once the export has

@@ -2,6 +2,8 @@ package xyz.apollosoftware.amphitheatre
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.media.MediaExtractor
+import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Build
@@ -159,10 +161,12 @@ class AmphitheatrePlugin : FlutterPlugin, MethodCallHandler, EventChannel.Stream
    * for the requested trim + quality, kicks it off, and registers the export
    * so progress polling, completion, and cancellation can find it.
    *
-   * Quality mapping: `passthrough` stream-copies the source (with media3's
-   * trim optimization, which re-encodes at most the first GOP so trims stay
-   * accurate); the named resolutions transcode to H.264/AAC, scaling down —
-   * never up. The [result] is answered later, by the Transformer listener.
+   * Quality mapping: `passthrough` stream-copies the source from the video
+   * sync sample at or before the requested start (no encoder for streams the
+   * MP4 muxer accepts, such as H.264/HEVC with AAC; media3 still transcodes
+   * a codec it cannot mux or non-square pixels); the named resolutions
+   * transcode to H.264/AAC, scaling down — never up. The [result] is answered
+   * later, by the Transformer listener.
    */
   private fun startExport(call: MethodCall, result: Result) {
     val context = this.context
@@ -208,8 +212,33 @@ class AmphitheatrePlugin : FlutterPlugin, MethodCallHandler, EventChannel.Stream
     val outputFile = File(outputPath)
     outputFile.parentFile?.mkdirs()
 
+    // A pure trim must stay a remux. media3 transcodes the whole clip
+    // whenever the start is past zero and not declared a key frame
+    // (TransformerInternal.clippingRequiresTranscode), and the flag alone
+    // only asserts it: a start between key frames would still be copied
+    // from the previous sync sample with the pre-roll hidden behind an edit
+    // list that not every player or processor honours. So the start is moved
+    // back to the video sync sample at or before the handle (≤ 1 s early on
+    // a GoPro clip, 1 s GOP), to the microsecond so the seek lands on that
+    // very sample, and only then declared a key frame: no encoder, no
+    // leading edit list. When the sample cannot be resolved the requested
+    // start is kept without the flag, and media3 transcodes as before:
+    // slow, but never a false assertion. Seen on a Galaxy S26 Ultra with a
+    // 5.3K HEVC GoPro clip (2026-11-05): a 30 s trim off a key frame was
+    // re-encoded in full, 15 s and +0.5 GB of memory, and came out at the
+    // encoder's 67 Mbps instead of the source's 30.
+    val syncStartUs: Long? = if (targetHeight == null && startMs != null) {
+      previousSyncSampleUs(inputPath, startMs)
+    } else {
+      null
+    }
     val clippingConfiguration = MediaItem.ClippingConfiguration.Builder().apply {
-      if (startMs != null) setStartPositionMs(startMs)
+      if (syncStartUs != null) {
+        setStartPositionUs(syncStartUs)
+        setStartsAtKeyFrame(true)
+      } else if (startMs != null) {
+        setStartPositionMs(startMs)
+      }
       if (endMs != null) setEndPositionMs(endMs)
     }.build()
 
@@ -237,11 +266,13 @@ class AmphitheatrePlugin : FlutterPlugin, MethodCallHandler, EventChannel.Stream
           // Transcode to broadly compatible codecs at the requested size.
           setVideoMimeType(MimeTypes.VIDEO_H264)
           setAudioMimeType(MimeTypes.AUDIO_AAC)
-        } else {
-          // Pure trim: stream-copy everything except (at most) the first GOP,
-          // which keeps trims fast, lossless, and accurate.
-          experimentalSetTrimOptimizationEnabled(true)
         }
+        // A pure trim is a plain stream copy from the key frame at or before
+        // the start (see the clipping configuration above). media3's trim
+        // optimization (re-encode only the first GOP for a frame-accurate
+        // start) is deliberately not enabled: when the encoder cannot match
+        // the source stream it falls back to a full transcode, which is the
+        // one cost a trim must never pay.
       }
       .addListener(object : Transformer.Listener {
         override fun onCompleted(composition: Composition, exportResult: ExportResult) {
@@ -281,6 +312,34 @@ class AmphitheatrePlugin : FlutterPlugin, MethodCallHandler, EventChannel.Stream
     // returns.
     activeExports[id] = ActiveExport(transformer, result, outputFile)
     scheduleProgressUpdates(id)
+  }
+
+  /**
+   * The presentation time, in microseconds, of the video sync sample at or
+   * before [startMs] in the file at [path]: a sample-table read on the
+   * platform thread, like [displayHeightOf] (milliseconds; a multi-GB
+   * chapter has a bigger table, accepted for now). A file without a video
+   * track has nothing to snap and answers [startMs] itself. Null when the
+   * sample cannot be determined (unreadable file, extractor failure), in
+   * which case the caller keeps the requested start and does not declare
+   * it a key frame.
+   */
+  private fun previousSyncSampleUs(path: String, startMs: Long): Long? {
+    val extractor = MediaExtractor()
+    return try {
+      extractor.setDataSource(path)
+      val video = (0 until extractor.trackCount).firstOrNull { track ->
+        extractor.getTrackFormat(track).getString(MediaFormat.KEY_MIME)?.startsWith("video/") == true
+      } ?: return startMs * 1000
+      extractor.selectTrack(video)
+      extractor.seekTo(startMs * 1000, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+      val sampleUs = extractor.sampleTime
+      if (sampleUs < 0 || sampleUs > startMs * 1000) null else sampleUs
+    } catch (exception: Exception) {
+      null
+    } finally {
+      extractor.release()
+    }
   }
 
   /**

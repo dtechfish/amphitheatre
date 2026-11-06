@@ -12,7 +12,7 @@ off the UI thread.
 * Optional compression: `AmphitheatreExportQuality` (passthrough / 2160p /
   1080p / 720p) — set `AmphitheatreEditorOptions.exportQuality`.
 * Android now uses `androidx.media3` Transformer (passthrough transmux for
-  pure trims with trim optimization, H.264/AAC transcode for compression,
+  pure trims from the key frame at or before the start, H.264/AAC transcode for compression,
   streamable fast-start MP4 output).
 * iOS uses the modern `AVAssetExportSession` API on iOS 18+
   (`export(to:as:)` + `states(updateInterval:)`) with a compatible fallback

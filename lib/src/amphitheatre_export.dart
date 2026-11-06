@@ -162,7 +162,9 @@ abstract final class AmphitheatreExporter {
 
   /// Start exporting the video at [inputPath].
   ///
-  /// [start] and [end] optionally trim the video to the given range. [quality]
+  /// [start] and [end] optionally trim the video to the given range (a
+  /// passthrough export starts at the video key frame at or before [start],
+  /// up to one GOP early, so the copy needs no re-encode). [quality]
   /// selects between a lossless passthrough remux and transcoding to a target
   /// resolution (see [AmphitheatreExportQuality]).
   ///
