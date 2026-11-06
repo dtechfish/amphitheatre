@@ -21,6 +21,9 @@ off the UI thread.
   surface a recovery UI (retry / back to editor) instead of hanging forever.
 * The trim slider is now a filmstrip: frame thumbnails, a scrim outside the
   selection, refined handles, and start/selected/end timestamps.
+* Dragging a trim handle on a video shorter than `minLength` keeps the
+  selection inside the video; the handle could be pushed past the end of the
+  slider before.
 * The editor undo history is bounded and gesture-coalesced;
   `AmphitheatreEditorController` gains `undo`/`canUndo`/`commitPending`.
 * The player shows a proper error state when a video fails to load.

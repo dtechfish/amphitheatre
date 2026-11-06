@@ -434,6 +434,13 @@ class _AmphitheatreEditorState extends State<AmphitheatreEditor> {
 
     if (!widget.options.shouldAutoAccept(widget.controller.duration)) return;
 
+    // The user may have cancelled while the video was still loading: this
+    // route is then on its way out and a pop here would take the route
+    // underneath it with it.
+    final ModalRoute<Object?>? route = ModalRoute.of(context);
+    bool routeIsCurrent() => route == null || route.isCurrent;
+    if (!routeIsCurrent()) return;
+
     final NavigatorState navigator = Navigator.of(context);
     if (widget.options.strict) {
       navigator.pop(null);
@@ -441,7 +448,12 @@ class _AmphitheatreEditorState extends State<AmphitheatreEditor> {
     }
 
     final String path = await widget.controller.resolveVideoFilePath();
-    if (mounted) navigator.pop(path);
+    if (!mounted || !routeIsCurrent()) return;
+
+    // The video started playing when it loaded; stop it so no audio leaks
+    // out while the route animates away.
+    widget.controller.pause();
+    navigator.pop(path);
   }
 
   /// Whether the changes can be accepted. This is currently based on whether
@@ -1295,7 +1307,14 @@ class _AmphitheatreEditorSliderState extends State<AmphitheatreEditorSlider> {
           cropEnd = cropStart + widget.options.minLength;
 
           if (cropEnd >= duration) {
-            cropStart = duration - widget.options.minLength;
+            // A video shorter than minLength selects all of it: the start
+            // must not go negative, or the handle leaves the slider.
+            cropStart = Duration(
+              milliseconds: math.max(
+                0,
+                (duration - widget.options.minLength).inMilliseconds,
+              ),
+            );
             cropEnd = duration;
           }
         } else {
@@ -1303,7 +1322,13 @@ class _AmphitheatreEditorSliderState extends State<AmphitheatreEditorSlider> {
 
           if (cropStart <= Duration.zero) {
             cropStart = Duration.zero;
-            cropEnd = widget.options.minLength;
+            // Likewise the end must not pass the video.
+            cropEnd = Duration(
+              milliseconds: math.min(
+                widget.options.minLength.inMilliseconds,
+                durationMilliseconds,
+              ),
+            );
           }
         }
       }
